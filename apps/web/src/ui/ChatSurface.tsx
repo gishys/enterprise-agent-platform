@@ -259,30 +259,90 @@ function RecommendationChips({
   loading: boolean;
   onSelect: (recommendation: RecommendationItem) => void;
 }) {
+  const sortedRecommendations = [...recommendations].sort((left, right) => left.rank - right.rank);
+
   return (
-    <div className="ml-9">
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {recommendations.map((recommendation) => {
-          const isHandoff = recommendation.type === "handoff";
-          return (
-            <button
+    <div className="ml-9 max-w-[calc(100%-2.25rem)]">
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+          <div className="inline-flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-slate-800">
+            <Sparkles size={13} className="shrink-0 text-primary" />
+            <span className="truncate">AI 推荐下一步</span>
+          </div>
+          <span className="shrink-0 text-[11px] text-slate-500">{recommendations.length} 条建议</span>
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {sortedRecommendations.map((recommendation, index) => (
+            <RecommendationRow
               key={recommendation.id}
-              type="button"
-              title={recommendation.label}
-              onClick={() => onSelect(recommendation)}
-              disabled={loading}
-              className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium shadow-sm transition disabled:opacity-60 ${
-                isHandoff
-                  ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-primary hover:text-primary"
-              }`}
-            >
-              {isHandoff ? <Headphones size={14} /> : <Sparkles size={13} />}
-              <span className="max-w-[180px] truncate">{recommendation.label}</span>
-            </button>
-          );
-        })}
+              recommendation={recommendation}
+              loading={loading}
+              onSelect={onSelect}
+              featured={index === 0}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
 }
+
+function RecommendationRow({
+  recommendation,
+  loading,
+  onSelect,
+  featured
+}: {
+  recommendation: RecommendationItem;
+  loading: boolean;
+  onSelect: (recommendation: RecommendationItem) => void;
+  featured: boolean;
+}) {
+  const isHandoff = recommendation.type === "handoff";
+
+  return (
+    <button
+      type="button"
+      title={recommendation.label}
+      onClick={() => onSelect(recommendation)}
+      disabled={loading}
+      className="group grid min-h-14 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-left transition hover:bg-slate-50 disabled:opacity-60"
+    >
+      <span
+        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
+          isHandoff ? "bg-amber-50 text-amber-700" : featured ? "bg-sky-50 text-primary" : "bg-slate-50 text-slate-600"
+        }`}
+      >
+        {isHandoff ? <Headphones size={14} /> : <Sparkles size={13} />}
+      </span>
+      <span className="min-w-0">
+        <span className="block break-words text-sm font-medium leading-5 text-slate-900">{recommendation.label}</span>
+        <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-4 text-slate-500">
+          <span>{recommendationTypeLabel[recommendation.type]}</span>
+          <span>{recommendationSourceLabel[recommendation.source]}</span>
+          <span className="min-w-0 max-w-full truncate">{recommendation.intent}</span>
+        </span>
+      </span>
+      <span className="rounded-md px-2 py-1 text-xs font-medium text-primary transition group-hover:bg-sky-50">使用</span>
+    </button>
+  );
+}
+
+const recommendationTypeLabel: Record<RecommendationItem["type"], string> = {
+  question: "追问",
+  clarification: "澄清",
+  handoff: "转人工",
+  action: "操作"
+};
+
+const recommendationSourceLabel: Record<RecommendationItem["source"], string> = {
+  risk: "风险识别",
+  conversation: "上下文",
+  "user-profile": "用户画像",
+  "business-config": "业务配置",
+  knowledge: "知识库",
+  bandit: "智能探索",
+  ltr: "排序模型",
+  fallback: "兜底"
+};
