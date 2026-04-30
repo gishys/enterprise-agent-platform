@@ -11,3 +11,4 @@ coverage/
 *.log
 prisma/dev.db
 local_pgdata/
+.ssh-project/
