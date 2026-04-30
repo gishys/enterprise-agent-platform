@@ -18,7 +18,7 @@ export class RolesGuard implements CanActivate {
     }
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     if (!requiredRoles.includes(request.user.role)) {
-      throw new ForbiddenException("无权访问该资源");
+      throw new ForbiddenException("当前角色无权访问该资源");
     }
     return true;
   }

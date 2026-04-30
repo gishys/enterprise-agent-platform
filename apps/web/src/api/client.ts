@@ -1,4 +1,15 @@
-import type { AuthUser, ConversationDto, LoginRequest, LoginResponse } from "@ai-service/shared";
+import type {
+  AgentConversationItem,
+  AuditEvent,
+  AuthUser,
+  ConversationDto,
+  EvaluationRun,
+  KnowledgeItem,
+  KnowledgeUploadJob,
+  LoginRequest,
+  LoginResponse,
+  OperationsDashboard
+} from "@ai-service/shared";
 
 let accessToken: string | undefined;
 
@@ -91,4 +102,31 @@ export function rateConversation(id: string, score: "satisfied" | "neutral" | "u
     method: "POST",
     body: JSON.stringify({ score, messageId })
   });
+}
+
+export function listKnowledge() {
+  return apiRequest<KnowledgeItem[]>("/knowledge");
+}
+
+export function createKnowledgeUpload(fileName: string) {
+  return apiRequest<KnowledgeUploadJob>("/knowledge/uploads", {
+    method: "POST",
+    body: JSON.stringify({ fileName })
+  });
+}
+
+export function listAgentConversations() {
+  return apiRequest<AgentConversationItem[]>("/agent/conversations");
+}
+
+export function getOperationsDashboard() {
+  return apiRequest<OperationsDashboard>("/operations/dashboard");
+}
+
+export function listEvaluationRuns() {
+  return apiRequest<EvaluationRun[]>("/evaluations/runs");
+}
+
+export function listAuditEvents() {
+  return apiRequest<AuditEvent[]>("/audit-events");
 }

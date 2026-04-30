@@ -48,7 +48,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const conversation = await api.sendConversationMessage(conversationId, content);
       set({ status: conversation.status, messages: conversation.shortContext, loading: false });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "发送失败", loading: false });
+      set({ error: error instanceof Error ? error.message : "消息发送失败", loading: false });
     }
   },
   requestHuman: async () => {
@@ -71,7 +71,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await api.rateConversation(conversationId, score, lastAnswer?.id);
       set({ error: undefined });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "评价失败" });
+      set({ error: error instanceof Error ? error.message : "满意度提交失败" });
     }
   }
 }));

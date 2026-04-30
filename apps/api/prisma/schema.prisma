@@ -59,6 +59,7 @@ model User {
   username      String         @unique
   passwordHash  String
   displayName   String
+  tenantId      String         @default("default")
   department    String?
   role          UserRole       @default(USER)
   status        UserStatus     @default(ACTIVE)
@@ -84,10 +85,14 @@ model Conversation {
   id                   String             @id @default(uuid())
   channel              Channel
   status               ConversationStatus @default(WAITING_FOR_USER)
+  tenantId             String             @default("default")
+  department           String?
   userId               String?
   user                 User?              @relation(fields: [userId], references: [id])
   longSummary          String             @default("")
   humanHandoffReason   String?
+  closedReason         String?
+  slaDueAt             DateTime?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
   messages             Message[]
@@ -102,6 +107,10 @@ model Message {
   role           MessageRole
   content        String
   auditTags      String[]      @default([])
+  modelTraceId   String?
+  promptVersion  String?
+  tokenUsage     Int?
+  latencyMs      Int?
   createdAt      DateTime      @default(now())
   sources        MessageSource[]
 }
@@ -122,10 +131,14 @@ model Knowledge {
   title            String
   body             String
   owner            String
+  sourceFile       String?
   sourceUrl        String?
   version          Int               @default(1)
   status           KnowledgeStatus   @default(DRAFT)
   sensitivity      SensitivityLevel  @default(INTERNAL)
+  approvedBy       String?
+  parseStatus      String            @default("queued")
+  chunkCount       Int               @default(0)
   effectiveFrom    DateTime?
   effectiveTo      DateTime?
   createdAt        DateTime          @default(now())
@@ -140,6 +153,8 @@ model PromptTemplate {
   content     String
   status      String   @default("draft")
   createdBy   String
+  approvedBy  String?
+  publishedAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -174,6 +189,9 @@ model AuditEvent {
   resourceType String
   resourceId   String
   riskLevel    String
+  requestId    String?
+  beforeState  Json?
+  afterState   Json?
   metadata     Json
   createdAt    DateTime @default(now())
 }

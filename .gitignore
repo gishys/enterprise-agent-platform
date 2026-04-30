@@ -10,3 +10,4 @@ coverage/
 !.env.example
 *.log
 prisma/dev.db
+local_pgdata/

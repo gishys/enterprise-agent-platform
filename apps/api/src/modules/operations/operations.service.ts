@@ -1,22 +1,26 @@
 import { Injectable } from "@nestjs/common";
-import { promptTemplates, templateCatalog } from "@ai-service/shared";
+import { promptTemplates, templateCatalog, type OperationsDashboard } from "@ai-service/shared";
 
 @Injectable()
 export class OperationsService {
-  dashboard() {
+  dashboard(): OperationsDashboard {
     return {
-      knowledgeHitRate: 0.78,
-      noAnswerRate: 0.09,
-      humanHandoffRate: 0.13,
+      knowledgeHitRate: 0.86,
+      noAnswerRate: 0.07,
+      humanHandoffRate: 0.14,
       satisfaction: 4.6,
-      unresolvedQuestions: 12
+      averageResponseMs: 920,
+      unresolvedQuestions: 12,
+      evaluationPassRate: 0.91
     };
   }
 
   templates() {
     return {
       templateCatalog,
-      promptTemplates
+      promptTemplates,
+      promptLifecycle: ["draft", "reviewing", "published", "archived"],
+      releasePolicy: "Prompt 发布需管理员审核，并记录版本、审计事件和评测结果。"
     };
   }
 }
