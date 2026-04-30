@@ -43,7 +43,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, ret
   }
 
   if (!response.ok) {
-    const fallback = { message: `请求失败：${response.status}` };
+    const fallback = { message: `Request failed with ${response.status}` };
     const payload = await response.json().catch(() => fallback);
     throw new Error(payload.message ?? fallback.message);
   }
@@ -114,10 +114,6 @@ export async function streamConversationMessage(
   });
 
   if (!response.ok || !response.body) {
-    if (response.status === 404 || response.status === 405) {
-      throw new Error("当前服务暂未启用流式智能回复，请联系管理员检查服务版本后再试。");
-    }
-
     const fallback = { message: `Request failed with ${response.status}` };
     const payload = await response.json().catch(() => fallback);
     throw new Error(payload.message ?? fallback.message);
