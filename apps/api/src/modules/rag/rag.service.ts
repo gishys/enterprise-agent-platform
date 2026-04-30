@@ -67,39 +67,38 @@ export class RagService {
 
   private async semanticRecall(query: string, user?: AuthUser): Promise<RawChunkHit[]> {
     if (!this.embedding.isConfigured()) return [];
-    const vector = `[${(await this.embedding.embed(query)).join(",")}]`;
+    const vector = await this.embedding.embed(query);
     const topK = Number(this.config.get("RAG_TOP_K") ?? 8);
     const sensitivities = this.allowedSensitivities(user);
-    return this.prisma.$queryRawUnsafe<RawChunkHit[]>(
-      `
-      SELECT
-        c."id" AS "chunkId",
-        c."knowledgeId",
-        c."title",
-        c."type",
-        c."owner",
-        c."sourceUrl",
-        c."version",
-        c."sensitivity"::text AS "sensitivity",
-        c."effectiveFrom",
-        c."effectiveTo",
-        c."content",
-        (1 - (c."embedding" <=> $1::vector))::float AS "score",
-        'pgvector' AS "stage"
-      FROM "KnowledgeChunk" c
-      JOIN "Knowledge" k ON k."id" = c."knowledgeId"
-      WHERE c."embedding" IS NOT NULL
-        AND k."status" = 'PUBLISHED'::"KnowledgeStatus"
-        AND c."sensitivity"::text = ANY($2)
-        AND (c."effectiveFrom" IS NULL OR c."effectiveFrom" <= NOW())
-        AND (c."effectiveTo" IS NULL OR c."effectiveTo" >= NOW())
-      ORDER BY c."embedding" <=> $1::vector
-      LIMIT $3
-      `,
-      vector,
-      sensitivities,
-      topK
-    );
+    const chunks = await this.prisma.knowledgeChunk.findMany({
+      where: {
+        sensitivity: { in: sensitivities as Uppercase<SensitivityLevel>[] },
+        knowledge: { status: "PUBLISHED" },
+        OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: new Date() } }],
+        AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }] }]
+      },
+      take: Math.max(topK * 20, topK)
+    });
+
+    return chunks
+      .map((chunk) => ({
+        chunkId: chunk.id,
+        knowledgeId: chunk.knowledgeId,
+        title: chunk.title,
+        type: chunk.type as SourceReference["type"],
+        owner: chunk.owner,
+        sourceUrl: chunk.sourceUrl,
+        version: chunk.version,
+        sensitivity: chunk.sensitivity,
+        effectiveFrom: chunk.effectiveFrom,
+        effectiveTo: chunk.effectiveTo,
+        content: chunk.content,
+        score: this.cosineSimilarity(vector, this.toVector(chunk.embedding)),
+        stage: "pgvector" as const
+      }))
+      .filter((hit) => hit.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK);
   }
 
   private async openSearchRecall(query: string, user?: AuthUser): Promise<RawChunkHit[]> {
@@ -216,6 +215,25 @@ export class RagService {
     if (!terms.length) return 0;
     const matches = terms.filter((term) => normalized.includes(term)).length;
     return 0.55 + Math.min(0.35, matches / terms.length / 3);
+  }
+
+  private toVector(value: unknown) {
+    return Array.isArray(value) ? value.map(Number).filter(Number.isFinite) : [];
+  }
+
+  private cosineSimilarity(a: number[], b: number[]) {
+    const length = Math.min(a.length, b.length);
+    if (!length) return 0;
+    let dot = 0;
+    let aNorm = 0;
+    let bNorm = 0;
+    for (let index = 0; index < length; index += 1) {
+      dot += a[index] * b[index];
+      aNorm += a[index] * a[index];
+      bNorm += b[index] * b[index];
+    }
+    if (!aNorm || !bNorm) return 0;
+    return dot / (Math.sqrt(aNorm) * Math.sqrt(bNorm));
   }
 
   private allowedSensitivities(user?: AuthUser) {

@@ -155,7 +155,7 @@ model KnowledgeChunk {
   knowledgeId   String
   knowledge     Knowledge    @relation(fields: [knowledgeId], references: [id])
   content       String
-  embedding     Unsupported("vector")?
+  embedding     Json?
   metadata      Json         @default("{}")
   title         String
   type          String

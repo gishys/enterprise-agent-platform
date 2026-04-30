@@ -1,10 +1,8 @@
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS "KnowledgeChunk" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "knowledgeId" TEXT NOT NULL,
   "content" TEXT NOT NULL,
-  "embedding" vector(1536),
+  "embedding" JSONB,
   "metadata" JSONB NOT NULL DEFAULT '{}',
   "title" TEXT NOT NULL,
   "type" TEXT NOT NULL,
@@ -23,4 +21,3 @@ CREATE TABLE IF NOT EXISTS "KnowledgeChunk" (
 CREATE INDEX IF NOT EXISTS "KnowledgeChunk_knowledgeId_idx" ON "KnowledgeChunk"("knowledgeId");
 CREATE INDEX IF NOT EXISTS "KnowledgeChunk_sensitivity_idx" ON "KnowledgeChunk"("sensitivity");
 CREATE INDEX IF NOT EXISTS "KnowledgeChunk_version_idx" ON "KnowledgeChunk"("version");
-CREATE INDEX IF NOT EXISTS "KnowledgeChunk_embedding_hnsw_idx" ON "KnowledgeChunk" USING hnsw ("embedding" vector_cosine_ops);
