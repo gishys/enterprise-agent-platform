@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import cookieParser from "cookie-parser";
 import { AppModule } from "./modules/app.module.js";
@@ -11,7 +12,9 @@ async function bootstrap() {
   });
   app.use(cookieParser());
   app.setGlobalPrefix("api");
-  await app.listen(process.env.PORT ? Number(process.env.PORT) : 3000);
+  const configService = app.get(ConfigService);
+  const port = configService.get<number>("app.port") ?? 3000;
+  await app.listen(port);
 }
 
 void bootstrap();

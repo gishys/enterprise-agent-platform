@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { appConfig } from "../config/app.config.js";
 import { AgentModule } from "./agent/agent.module.js";
 import { AuditModule } from "./audit/audit.module.js";
 import { AuthModule } from "./auth/auth.module.js";
@@ -16,7 +17,7 @@ import { RecommendationModule } from "./recommendation/recommendation.module.js"
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
     PrismaModule,
     AuthModule,
     ConversationModule,
