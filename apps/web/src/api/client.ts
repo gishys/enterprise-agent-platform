@@ -2,13 +2,16 @@ import type {
   AgentConversationItem,
   AuditEvent,
   AuthUser,
+  ChatStreamEvent,
   ConversationDto,
   EvaluationRun,
   KnowledgeItem,
   KnowledgeUploadJob,
   LoginRequest,
   LoginResponse,
-  OperationsDashboard
+  OperationsDashboard,
+  RecommendationEventType,
+  RecommendationItem
 } from "@ai-service/shared";
 
 let accessToken: string | undefined;
@@ -83,11 +86,59 @@ export function getConversation(id: string) {
   return apiRequest<ConversationDto>(`/conversations/${id}`);
 }
 
-export function sendConversationMessage(id: string, content: string) {
+export function sendConversationMessage(id: string, content: string, recommendationId?: string) {
   return apiRequest<ConversationDto>(`/conversations/${id}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content })
+    body: JSON.stringify({ content, recommendationId })
   });
+}
+
+export async function streamConversationMessage(
+  id: string,
+  content: string,
+  onEvent: (event: ChatStreamEvent) => void,
+  recommendationId?: string
+) {
+  const headers = new Headers();
+  headers.set("Content-Type", "application/json");
+  headers.set("Accept", "text/event-stream");
+  if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+  }
+
+  const response = await fetch(`/api/conversations/${id}/messages/stream`, {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({ content, recommendationId })
+  });
+
+  if (!response.ok || !response.body) {
+    if (response.status === 404 || response.status === 405) {
+      throw new Error("当前服务暂未启用流式智能回复，请联系管理员检查服务版本后再试。");
+    }
+
+    const fallback = { message: `Request failed with ${response.status}` };
+    const payload = await response.json().catch(() => fallback);
+    throw new Error(payload.message ?? fallback.message);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split(/\n\n/);
+    buffer = events.pop() ?? "";
+    for (const rawEvent of events) {
+      const dataLine = rawEvent.split(/\r?\n/).find((line) => line.startsWith("data:"));
+      if (dataLine) {
+        onEvent(JSON.parse(dataLine.slice(5).trim()) as ChatStreamEvent);
+      }
+    }
+  }
 }
 
 export function requestHumanHandoff(id: string, reason?: string) {
@@ -101,6 +152,22 @@ export function rateConversation(id: string, score: "satisfied" | "neutral" | "u
   return apiRequest<{ conversationId: string; score: string; recordedAt: string }>(`/conversations/${id}/satisfaction`, {
     method: "POST",
     body: JSON.stringify({ score, messageId })
+  });
+}
+
+export function listRecommendations(id: string) {
+  return apiRequest<RecommendationItem[]>(`/conversations/${id}/recommendations`);
+}
+
+export function recordRecommendationEvent(
+  conversationId: string,
+  recommendationId: string,
+  eventType: RecommendationEventType,
+  metadata?: Record<string, unknown>
+) {
+  return apiRequest<{ recorded: boolean; reward?: number }>(`/conversations/${conversationId}/recommendations/${recommendationId}/events`, {
+    method: "POST",
+    body: JSON.stringify({ eventType, metadata })
   });
 }
 

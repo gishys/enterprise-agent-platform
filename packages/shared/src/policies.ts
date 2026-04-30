@@ -31,11 +31,16 @@ export const responseGuardrails = [
 export function screenRisk(content: string | undefined) {
   const text = content?.trim() ?? "";
   const triggers = highRiskTriggers.filter((trigger) => text.includes(trigger));
+  const riskLevel = triggers.length > 0 ? ("high" as const) : ("low" as const);
   return {
     allowed: triggers.length === 0,
     requiresHumanHandoff: triggers.length > 0,
     triggers,
     decision: triggers.length > 0 ? ("handoff" as const) : ("continue" as const),
-    riskLevel: triggers.length > 0 ? ("high" as const) : ("low" as const)
+    riskLevel,
+    recommendedAction: triggers.length > 0 ? ("human_review" as const) : ("continue" as const),
+    allowedRecommendationTypes:
+      riskLevel === "high" ? (["handoff", "clarification"] as const) : (["question", "clarification", "handoff", "action"] as const),
+    blockedIntents: riskLevel === "high" ? (["policy-conclusion", "material-confirmation", "progress-query"] as const) : ([] as const)
   };
 }

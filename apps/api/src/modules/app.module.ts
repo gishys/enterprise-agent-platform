@@ -7,10 +7,12 @@ import { ConversationModule } from "./conversation/conversation.module.js";
 import { EvaluationsModule } from "./evaluations/evaluations.module.js";
 import { GovernanceModule } from "./governance/governance.module.js";
 import { KnowledgeModule } from "./knowledge/knowledge.module.js";
+import { LlmModule } from "./llm/llm.module.js";
 import { OperationsModule } from "./operations/operations.module.js";
 import { PromptsModule } from "./prompts/prompts.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { RagModule } from "./rag/rag.module.js";
+import { RecommendationModule } from "./recommendation/recommendation.module.js";
 
 @Module({
   imports: [
@@ -18,6 +20,7 @@ import { RagModule } from "./rag/rag.module.js";
     PrismaModule,
     AuthModule,
     ConversationModule,
+    LlmModule,
     KnowledgeModule,
     RagModule,
     GovernanceModule,
@@ -25,7 +28,8 @@ import { RagModule } from "./rag/rag.module.js";
     AgentModule,
     PromptsModule,
     EvaluationsModule,
-    AuditModule
+    AuditModule,
+    RecommendationModule
   ]
 })
 export class AppModule {}

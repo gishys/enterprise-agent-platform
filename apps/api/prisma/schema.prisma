@@ -68,6 +68,8 @@ model User {
   conversations Conversation[]
   auditEvents   AuditEvent[]
   refreshTokens RefreshToken[]
+  recommendations Recommendation[]
+  interestProfiles UserInterestProfile[]
 }
 
 model RefreshToken {
@@ -98,6 +100,7 @@ model Conversation {
   messages             Message[]
   satisfactions        Satisfaction[]
   humanHandoffs        HumanHandoff[]
+  recommendations      Recommendation[]
 }
 
 model Message {
@@ -144,6 +147,31 @@ model Knowledge {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   messageSources   MessageSource[]
+  chunks           KnowledgeChunk[]
+}
+
+model KnowledgeChunk {
+  id            String       @id @default(uuid())
+  knowledgeId   String
+  knowledge     Knowledge    @relation(fields: [knowledgeId], references: [id])
+  content       String
+  embedding     Unsupported("vector")?
+  metadata      Json         @default("{}")
+  title         String
+  type          String
+  owner         String
+  sourceUrl     String?
+  version       Int
+  sensitivity   SensitivityLevel
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  tokenCount    Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([knowledgeId])
+  @@index([sensitivity])
+  @@index([version])
 }
 
 model PromptTemplate {
@@ -194,4 +222,146 @@ model AuditEvent {
   afterState   Json?
   metadata     Json
   createdAt    DateTime @default(now())
+}
+
+model Recommendation {
+  id                String                  @id @default(uuid())
+  conversationId    String
+  conversation      Conversation            @relation(fields: [conversationId], references: [id])
+  userId            String?
+  user              User?                   @relation(fields: [userId], references: [id])
+  tenantId          String                  @default("default")
+  channel           String
+  type              String
+  source            String
+  intent            String
+  label             String
+  payload           Json                    @default("{}")
+  reasonCode        String
+  score             Float
+  rank              Int
+  status            String                  @default("generated")
+  modelTraceId      String?
+  promptVersion     String?
+  rankerVersion     String                  @default("hybrid-rules-bandit-ltr@v1")
+  banditArmId       String?
+  banditArm         RecommendationArm?      @relation(fields: [banditArmId], references: [id])
+  featureSnapshot   Json                    @default("{}")
+  modelScore        Float?
+  explorationBucket String?
+  expiresAt         DateTime
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  events            RecommendationEvent[]
+  trainingSamples   RankingTrainingSample[]
+
+  @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
+  @@index([tenantId, source, intent])
+}
+
+model RecommendationEvent {
+  id                  String         @id @default(uuid())
+  recommendationId    String
+  recommendation      Recommendation @relation(fields: [recommendationId], references: [id])
+  conversationId      String
+  userId              String?
+  eventType           String
+  reward              Float          @default(0)
+  convertedAt         DateTime?
+  dwellMs             Int?
+  downstreamMessageId String?
+  metadata            Json           @default("{}")
+  createdAt           DateTime       @default(now())
+
+  @@index([recommendationId, createdAt])
+  @@index([conversationId, eventType])
+}
+
+model UserInterestProfile {
+  id                String    @id @default(uuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  tenantId          String    @default("default")
+  department        String?
+  role              String
+  interestVector    Json      @default("[]")
+  frequentIntents   Json      @default("[]")
+  recentIntents     Json      @default("[]")
+  negativeIntents   Json      @default("[]")
+  lastInteractionAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([userId, tenantId])
+  @@index([tenantId, department, role])
+}
+
+model RecommendationArm {
+  id              String                  @id @default(uuid())
+  tenantId        String                  @default("default")
+  name            String
+  strategy        String
+  source          String
+  intent          String
+  promptVariant   String?
+  enabled         Boolean                 @default(true)
+  priorAlpha      Float                   @default(1)
+  priorBeta       Float                   @default(1)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  stats           RecommendationArmStat[]
+  recommendations Recommendation[]
+
+  @@unique([tenantId, intent, strategy])
+  @@index([tenantId, enabled])
+}
+
+model RecommendationArmStat {
+  id          String            @id @default(uuid())
+  armId       String
+  arm         RecommendationArm @relation(fields: [armId], references: [id])
+  contextKey  String
+  impressions Int               @default(0)
+  clicks      Int               @default(0)
+  sends       Int               @default(0)
+  conversions Int               @default(0)
+  dismisses   Int               @default(0)
+  alpha       Float             @default(1)
+  beta        Float             @default(1)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([armId, contextKey])
+  @@index([contextKey])
+}
+
+model RankingTrainingSample {
+  id                String          @id @default(uuid())
+  recommendationId  String?
+  recommendation    Recommendation? @relation(fields: [recommendationId], references: [id])
+  userId            String?
+  conversationId    String?
+  featureSnapshot   Json            @default("{}")
+  label             String
+  reward            Float           @default(0)
+  createdAt         DateTime        @default(now())
+
+  @@index([recommendationId])
+  @@index([createdAt])
+}
+
+model RankingModelVersion {
+  id          String    @id @default(uuid())
+  modelType   String
+  version     String
+  metrics     Json      @default("{}")
+  artifactUri String?
+  status      String    @default("shadow")
+  activatedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([modelType, version])
+  @@index([status])
 }

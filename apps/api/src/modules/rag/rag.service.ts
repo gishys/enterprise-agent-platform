@@ -1,51 +1,226 @@
 import { Injectable } from "@nestjs/common";
-import type { SourceReference } from "@ai-service/shared";
+import { ConfigService } from "@nestjs/config";
+import type { AuthUser, RagRetrievalResult, SensitivityLevel, SourceReference } from "@ai-service/shared";
 import { screenRisk } from "@ai-service/shared";
+import { EmbeddingService } from "../llm/embedding.service.js";
+import { PrismaService } from "../prisma/prisma.service.js";
 
-const publishedSources: SourceReference[] = [
-  {
-    id: "kb-001",
-    title: "业务办理进度查询流程",
-    type: "process",
-    owner: "运营服务部",
-    effectiveFrom: "2026-01-01",
-    excerpt: "用户可通过统一服务门户、移动 H5 或人工客服查询业务办理进度，查询前需完成身份校验。",
-    score: 0.93,
-    version: 3,
-    sensitivity: "internal"
-  },
-  {
-    id: "kb-002",
-    title: "材料清单标准答案",
-    type: "standard-answer",
-    owner: "业务管理部",
-    effectiveFrom: "2026-02-01",
-    excerpt: "材料清单应按业务类型、主体身份和属地政策组合生成；缺少条件时应先发起澄清。",
-    score: 0.88,
-    version: 2,
-    sensitivity: "public"
-  }
-];
+interface RawChunkHit {
+  chunkId: string;
+  knowledgeId: string;
+  title: string;
+  type: SourceReference["type"];
+  owner: string;
+  sourceUrl: string | null;
+  version: number;
+  sensitivity: string;
+  effectiveFrom: Date | null;
+  effectiveTo: Date | null;
+  content: string;
+  score: number;
+  stage: "pgvector" | "opensearch" | "keyword";
+}
 
 @Injectable()
 export class RagService {
-  retrieve(query: string): { query: string; strategy: string; sources: SourceReference[]; shouldRefuse: boolean; confidence: number; rewrittenQuery: string } {
-    const risk = screenRisk(query);
-    const rewrittenQuery = query?.trim() ? query.trim().replace(/\s+/g, " ") : "";
-    const sources = risk.requiresHumanHandoff
-      ? []
-      : publishedSources
-          .filter((source) => rewrittenQuery.includes("材料") ? source.id === "kb-002" : true)
-          .sort((a, b) => b.score - a.score);
+  constructor(
+    private readonly config: ConfigService,
+    private readonly embedding: EmbeddingService,
+    private readonly prisma: PrismaService
+  ) {}
+
+  async retrieve(query: string, user?: AuthUser): Promise<RagRetrievalResult> {
+    const risk = screenRisk(query ?? "");
+    const rewrittenQuery = this.rewriteQuery(query);
+    if (!rewrittenQuery || risk.requiresHumanHandoff) {
+      return {
+        query,
+        rewrittenQuery,
+        strategy: "risk-screen + no-retrieval",
+        sources: [],
+        shouldRefuse: true,
+        confidence: 0
+      };
+    }
+
+    const [semanticHits, keywordHits, fallbackHits] = await Promise.all([
+      this.semanticRecall(rewrittenQuery, user).catch(() => []),
+      this.openSearchRecall(rewrittenQuery, user).catch(() => []),
+      this.databaseKeywordRecall(rewrittenQuery, user).catch(() => [])
+    ]);
+    const sources = this.fuseAndRerank([...semanticHits, ...keywordHits, ...fallbackHits]);
     const confidence = sources.at(0)?.score ?? 0;
 
     return {
       query,
       rewrittenQuery,
-      strategy: "query-rewrite + pgvector semantic recall + OpenSearch keyword recall + reranker + permission filter",
+      strategy: "query-rewrite + pgvector semantic recall + OpenSearch BM25 recall + score fusion + permission/effective-date filter",
       sources,
-      shouldRefuse: risk.requiresHumanHandoff || confidence < 0.55,
+      shouldRefuse: confidence < 0.55,
       confidence
     };
+  }
+
+  private rewriteQuery(query: string) {
+    return query?.trim().replace(/\s+/g, " ") ?? "";
+  }
+
+  private async semanticRecall(query: string, user?: AuthUser): Promise<RawChunkHit[]> {
+    if (!this.embedding.isConfigured()) return [];
+    const vector = `[${(await this.embedding.embed(query)).join(",")}]`;
+    const topK = Number(this.config.get("RAG_TOP_K") ?? 8);
+    const sensitivities = this.allowedSensitivities(user);
+    return this.prisma.$queryRawUnsafe<RawChunkHit[]>(
+      `
+      SELECT
+        c."id" AS "chunkId",
+        c."knowledgeId",
+        c."title",
+        c."type",
+        c."owner",
+        c."sourceUrl",
+        c."version",
+        c."sensitivity"::text AS "sensitivity",
+        c."effectiveFrom",
+        c."effectiveTo",
+        c."content",
+        (1 - (c."embedding" <=> $1::vector))::float AS "score",
+        'pgvector' AS "stage"
+      FROM "KnowledgeChunk" c
+      JOIN "Knowledge" k ON k."id" = c."knowledgeId"
+      WHERE c."embedding" IS NOT NULL
+        AND k."status" = 'PUBLISHED'::"KnowledgeStatus"
+        AND c."sensitivity"::text = ANY($2)
+        AND (c."effectiveFrom" IS NULL OR c."effectiveFrom" <= NOW())
+        AND (c."effectiveTo" IS NULL OR c."effectiveTo" >= NOW())
+      ORDER BY c."embedding" <=> $1::vector
+      LIMIT $3
+      `,
+      vector,
+      sensitivities,
+      topK
+    );
+  }
+
+  private async openSearchRecall(query: string, user?: AuthUser): Promise<RawChunkHit[]> {
+    const url = this.config.get<string>("OPENSEARCH_URL")?.replace(/\/$/, "");
+    if (!url) return [];
+    const topK = Number(this.config.get("RAG_TOP_K") ?? 8);
+    const response = await fetch(`${url}/knowledge_chunks/_search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        size: topK,
+        query: {
+          bool: {
+            must: [
+              {
+                multi_match: {
+                  query,
+                  fields: ["title^3", "content^2", "type", "owner"],
+                  type: "best_fields"
+                }
+              }
+            ],
+            filter: [
+              { terms: { sensitivity: this.allowedSensitivities(user) } },
+              { term: { status: "PUBLISHED" } }
+            ]
+          }
+        }
+      })
+    });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as {
+      hits?: { hits?: Array<{ _score?: number; _source?: Record<string, unknown> }> };
+    };
+    return (
+      payload.hits?.hits?.map((hit) => {
+        const source = hit._source ?? {};
+        return {
+          chunkId: String(source.chunkId),
+          knowledgeId: String(source.knowledgeId),
+          title: String(source.title),
+          type: String(source.type) as SourceReference["type"],
+          owner: String(source.owner),
+          sourceUrl: source.sourceUrl ? String(source.sourceUrl) : null,
+          version: Number(source.version ?? 1),
+          sensitivity: String(source.sensitivity),
+          effectiveFrom: source.effectiveFrom ? new Date(String(source.effectiveFrom)) : null,
+          effectiveTo: source.effectiveTo ? new Date(String(source.effectiveTo)) : null,
+          content: String(source.content),
+          score: Math.min(0.98, (hit._score ?? 0) / 10),
+          stage: "opensearch"
+        };
+      }) ?? []
+    );
+  }
+
+  private async databaseKeywordRecall(query: string, user?: AuthUser): Promise<RawChunkHit[]> {
+    const words = query.split(/\s+/).filter(Boolean);
+    const knowledge = await this.prisma.knowledge.findMany({
+      where: {
+        status: "PUBLISHED",
+        sensitivity: { in: this.allowedSensitivities(user) as Uppercase<SensitivityLevel>[] },
+        OR: words.flatMap((word) => [{ title: { contains: word } }, { body: { contains: word } }])
+      },
+      take: Number(this.config.get("RAG_TOP_K") ?? 8)
+    });
+    return knowledge.map((item) => ({
+      chunkId: `${item.id}-body`,
+      knowledgeId: item.id,
+      title: item.title,
+      type: item.type as SourceReference["type"],
+      owner: item.owner,
+      sourceUrl: item.sourceUrl,
+      version: item.version,
+      sensitivity: item.sensitivity,
+      effectiveFrom: item.effectiveFrom,
+      effectiveTo: item.effectiveTo,
+      content: item.body,
+      score: this.lexicalScore(query, `${item.title} ${item.body}`),
+      stage: "keyword"
+    }));
+  }
+
+  private fuseAndRerank(hits: RawChunkHit[]): SourceReference[] {
+    const byChunk = new Map<string, RawChunkHit>();
+    for (const hit of hits) {
+      const existing = byChunk.get(hit.chunkId);
+      if (!existing || hit.score > existing.score) byChunk.set(hit.chunkId, hit);
+    }
+    const rerankTopK = Number(this.config.get("RERANK_TOP_K") ?? 5);
+    return [...byChunk.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, rerankTopK)
+      .map((hit) => ({
+        id: hit.knowledgeId,
+        chunkId: hit.chunkId,
+        title: hit.title,
+        type: hit.type,
+        owner: hit.owner,
+        effectiveFrom: hit.effectiveFrom?.toISOString() ?? new Date().toISOString(),
+        effectiveTo: hit.effectiveTo?.toISOString(),
+        url: hit.sourceUrl ?? undefined,
+        excerpt: hit.content.slice(0, 260),
+        score: Number(Math.max(0, Math.min(0.99, hit.score)).toFixed(2)),
+        version: hit.version,
+        sensitivity: hit.sensitivity.toLowerCase() as SensitivityLevel,
+        indexStage: hit.stage === "keyword" ? "hybrid" : hit.stage
+      }));
+  }
+
+  private lexicalScore(query: string, text: string) {
+    const normalized = text.toLowerCase();
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return 0;
+    const matches = terms.filter((term) => normalized.includes(term)).length;
+    return 0.55 + Math.min(0.35, matches / terms.length / 3);
+  }
+
+  private allowedSensitivities(user?: AuthUser) {
+    if (user?.role === "ADMIN" || user?.role === "AUDITOR") return ["PUBLIC", "INTERNAL", "SENSITIVE", "RESTRICTED"];
+    if (user?.role === "AGENT") return ["PUBLIC", "INTERNAL", "SENSITIVE"];
+    return ["PUBLIC", "INTERNAL"];
   }
 }

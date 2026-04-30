@@ -1,4 +1,5 @@
 import { defaultEntryConfiguration } from "@ai-service/shared";
+import type { RecommendationItem } from "@ai-service/shared";
 import {
   AlertTriangle,
   Bot,
@@ -37,16 +38,29 @@ export function ChatSurface({ mode }: { mode: "web" | "h5" }) {
   const status = useChatStore((state) => state.status);
   const loading = useChatStore((state) => state.loading);
   const error = useChatStore((state) => state.error);
+  const recommendations = useChatStore((state) => state.recommendations);
   const startConversation = useChatStore((state) => state.startConversation);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const requestHuman = useChatStore((state) => state.requestHuman);
   const rateLastAnswer = useChatStore((state) => state.rateLastAnswer);
+  const recordRecommendationEvent = useChatStore((state) => state.recordRecommendationEvent);
   const [draft, setDraft] = useState("");
   const maxLength = 500;
 
   useEffect(() => {
     void startConversation(mode === "h5" ? "mobile-h5" : "web-chat");
   }, [mode, startConversation]);
+
+  useEffect(() => {
+    recommendations.forEach((recommendation) => {
+      void recordRecommendationEvent(recommendation.id, "impression", {
+        rank: recommendation.rank,
+        source: recommendation.source,
+        intent: recommendation.intent,
+        rankerVersion: recommendation.rankerVersion
+      });
+    });
+  }, [recommendations, recordRecommendationEvent]);
 
   const isHandoff = status === "transferred_to_human" || status === "human_processing";
   const remaining = useMemo(() => maxLength - draft.length, [draft]);
@@ -61,6 +75,20 @@ export function ChatSurface({ mode }: { mode: "web" | "h5" }) {
     if (!value || loading || value.length > maxLength) return;
     void sendMessage(value);
     setDraft("");
+  };
+
+  const actOnRecommendation = async (recommendation: RecommendationItem) => {
+    await recordRecommendationEvent(recommendation.id, "click", {
+      rank: recommendation.rank,
+      source: recommendation.source,
+      intent: recommendation.intent
+    });
+    if (recommendation.type === "handoff") {
+      await requestHuman();
+      await recordRecommendationEvent(recommendation.id, "converted", { action: "handoff" });
+      return;
+    }
+    await sendMessage(recommendation.label, recommendation.id);
   };
 
   return (
@@ -92,20 +120,6 @@ export function ChatSurface({ mode }: { mode: "web" | "h5" }) {
           >
             <Headphones size={18} />
           </button>
-        </div>
-
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-          {defaultEntryConfiguration.quickQuestions.map((question) => (
-            <button
-              key={question}
-              type="button"
-              onClick={() => void sendMessage(question)}
-              disabled={loading}
-              className="h-9 shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700 transition hover:border-primary hover:bg-white hover:text-primary disabled:opacity-60"
-            >
-              {question}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -141,7 +155,7 @@ export function ChatSurface({ mode }: { mode: "web" | "h5" }) {
               >
                 <p className="whitespace-pre-wrap break-words">{message.content}</p>
                 {message.sources?.map((source) => (
-                  <div key={source.id} className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                  <div key={`${source.id}-${source.chunkId ?? source.title}`} className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 truncate font-semibold text-slate-900">{source.title}</div>
                       <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] text-slate-500">
@@ -152,6 +166,12 @@ export function ChatSurface({ mode }: { mode: "web" | "h5" }) {
                       <span>{source.owner}</span>
                       <span>v{source.version ?? 1}</span>
                       <span>{source.type}</span>
+                      {source.sensitivity ? <span>{source.sensitivity}</span> : null}
+                      {source.indexStage ? <span>{source.indexStage}</span> : null}
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-400">
+                      {new Date(source.effectiveFrom).toLocaleDateString()}
+                      {source.effectiveTo ? ` - ${new Date(source.effectiveTo).toLocaleDateString()}` : ""}
                     </div>
                     <p className="mt-2 line-clamp-2 leading-5">{source.excerpt}</p>
                   </div>
@@ -188,6 +208,9 @@ export function ChatSurface({ mode }: { mode: "web" | "h5" }) {
             </article>
           );
         })}
+        {recommendations.length ? (
+          <RecommendationChips recommendations={recommendations} loading={loading} onSelect={(recommendation) => void actOnRecommendation(recommendation)} />
+        ) : null}
         {loading ? (
           <div className="flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs text-slate-500 shadow-sm">
             <Sparkles size={14} className="text-primary" />
@@ -224,5 +247,42 @@ export function ChatSurface({ mode }: { mode: "web" | "h5" }) {
         </form>
       </div>
     </section>
+  );
+}
+
+function RecommendationChips({
+  recommendations,
+  loading,
+  onSelect
+}: {
+  recommendations: RecommendationItem[];
+  loading: boolean;
+  onSelect: (recommendation: RecommendationItem) => void;
+}) {
+  return (
+    <div className="ml-9">
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {recommendations.map((recommendation) => {
+          const isHandoff = recommendation.type === "handoff";
+          return (
+            <button
+              key={recommendation.id}
+              type="button"
+              title={recommendation.label}
+              onClick={() => onSelect(recommendation)}
+              disabled={loading}
+              className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium shadow-sm transition disabled:opacity-60 ${
+                isHandoff
+                  ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-primary hover:text-primary"
+              }`}
+            >
+              {isHandoff ? <Headphones size={14} /> : <Sparkles size={13} />}
+              <span className="max-w-[180px] truncate">{recommendation.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

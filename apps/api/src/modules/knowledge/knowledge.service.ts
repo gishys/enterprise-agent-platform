@@ -1,43 +1,34 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import type { KnowledgeItem, KnowledgeUploadJob } from "@ai-service/shared";
-
-const knowledgeItems: KnowledgeItem[] = [
-  {
-    id: "kb-001",
-    type: "process",
-    title: "业务办理进度查询流程",
-    owner: "运营服务部",
-    status: "published",
-    effectiveFrom: "2026-01-01",
-    sensitivity: "internal",
-    version: 3,
-    sourceFile: "service-progress-guide.pdf",
-    chunkCount: 42,
-    indexStatus: "indexed",
-    updatedAt: "2026-04-30T09:00:00.000Z"
-  },
-  {
-    id: "kb-002",
-    type: "standard-answer",
-    title: "材料清单标准答案",
-    owner: "业务管理部",
-    status: "reviewing",
-    effectiveFrom: "2026-02-01",
-    sensitivity: "public",
-    version: 2,
-    sourceFile: "material-checklist.docx",
-    chunkCount: 28,
-    indexStatus: "indexed",
-    updatedAt: "2026-04-29T11:30:00.000Z"
-  }
-];
+import { PrismaService } from "../prisma/prisma.service.js";
+import { RagIndexService } from "../rag/rag-index.service.js";
 
 const jobs = new Map<string, KnowledgeUploadJob>();
 
 @Injectable()
 export class KnowledgeService {
-  list() {
-    return knowledgeItems;
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly ragIndex: RagIndexService
+  ) {}
+
+  async list(): Promise<KnowledgeItem[]> {
+    const items = await this.prisma.knowledge.findMany({ orderBy: { updatedAt: "desc" } });
+    return items.map((item) => ({
+      id: item.id,
+      type: item.type as KnowledgeItem["type"],
+      title: item.title,
+      owner: item.owner,
+      status: item.status.toLowerCase() as KnowledgeItem["status"],
+      effectiveFrom: item.effectiveFrom?.toISOString() ?? item.createdAt.toISOString(),
+      sensitivity: item.sensitivity.toLowerCase() as KnowledgeItem["sensitivity"],
+      version: item.version,
+      sourceFile: item.sourceFile ?? undefined,
+      chunkCount: item.chunkCount,
+      indexStatus: item.parseStatus as KnowledgeItem["indexStatus"],
+      indexStage: item.parseStatus,
+      updatedAt: item.updatedAt.toISOString()
+    }));
   }
 
   createUploadJob(fileName = "uploaded-document.pdf") {
@@ -47,13 +38,14 @@ export class KnowledgeService {
       status: "indexed",
       createdAt: new Date().toISOString(),
       steps: [
-        { name: "上传", status: "done" },
-        { name: "解析", status: "done" },
-        { name: "清洗", status: "done" },
-        { name: "切片", status: "done" },
-        { name: "向量化", status: "done" },
-        { name: "关键词索引", status: "done" },
-        { name: "待审核发布", status: "running" }
+        { name: "upload", status: "done" },
+        { name: "parse", status: "done" },
+        { name: "clean", status: "done" },
+        { name: "chunk", status: "done" },
+        { name: "embedding", status: "running" },
+        { name: "pgvector", status: "pending" },
+        { name: "opensearch", status: "pending" },
+        { name: "review", status: "pending" }
       ]
     };
     jobs.set(job.id, job);
@@ -63,23 +55,35 @@ export class KnowledgeService {
   getJob(id: string) {
     const job = jobs.get(id);
     if (!job) {
-      throw new NotFoundException("未找到知识库处理任务");
+      throw new NotFoundException("Knowledge processing job was not found.");
     }
     return job;
   }
 
-  publish(id: string, reviewer = "admin") {
-    const item = knowledgeItems.find((entry) => entry.id === id);
+  async publish(id: string, reviewer = "admin") {
+    const item = await this.prisma.knowledge.findUnique({ where: { id } });
     if (!item) {
-      throw new NotFoundException("未找到知识条目");
+      throw new NotFoundException("Knowledge item was not found.");
     }
-    item.status = "published";
-    item.version += 1;
-    item.updatedAt = new Date().toISOString();
+
+    const published = await this.prisma.knowledge.update({
+      where: { id },
+      data: {
+        status: "PUBLISHED",
+        approvedBy: reviewer,
+        version: { increment: 1 },
+        parseStatus: "chunking"
+      }
+    });
+    const indexResult = await this.ragIndex.indexKnowledge(published);
+
     return {
-      ...item,
+      id: published.id,
+      title: published.title,
       reviewer,
-      auditAction: "knowledge.publish"
+      auditAction: "knowledge.publish",
+      indexStatus: indexResult.status,
+      chunkCount: indexResult.chunkCount
     };
   }
 }

@@ -27,6 +27,8 @@ export type ConversationStatus =
   | "human_processing"
   | "closed";
 
+export type RiskLevel = "low" | "medium" | "high";
+
 export type MessageRole = "user" | "assistant" | "human-agent" | "system";
 
 export type KnowledgeType =
@@ -57,15 +59,18 @@ export type PromptTemplateKind =
 
 export interface SourceReference {
   id: string;
+  chunkId?: string;
   title: string;
   type: KnowledgeType;
   owner: string;
   effectiveFrom: string;
+  effectiveTo?: string;
   url?: string;
   excerpt: string;
   score: number;
   version?: number;
   sensitivity?: SensitivityLevel;
+  indexStage?: "pgvector" | "opensearch" | "hybrid";
 }
 
 export interface ChatMessage {
@@ -91,6 +96,7 @@ export interface ConversationSummary {
   userDisplayName: string;
   shortContext: ChatMessage[];
   longSummary: string;
+  recommendations: RecommendationItem[];
   satisfaction?: "satisfied" | "neutral" | "unsatisfied";
   humanHandoffReason?: string;
   slaDueAt?: string;
@@ -110,9 +116,26 @@ export interface KnowledgeItem {
   version: number;
   sourceFile?: string;
   chunkCount?: number;
-  indexStatus?: "queued" | "parsing" | "indexed" | "failed";
+  indexStatus?: "queued" | "parsing" | "chunking" | "embedding" | "pgvector" | "opensearch" | "indexed" | "failed";
+  indexStage?: string;
   updatedAt?: string;
 }
+
+export interface RagRetrievalResult {
+  query: string;
+  rewrittenQuery: string;
+  strategy: string;
+  sources: SourceReference[];
+  shouldRefuse: boolean;
+  confidence: number;
+}
+
+export type ChatStreamEvent =
+  | { type: "message.created"; conversationId: string; message: ChatMessage }
+  | { type: "rag.retrieved"; conversationId: string; retrieval: RagRetrievalResult }
+  | { type: "answer.delta"; conversationId: string; delta: string }
+  | { type: "answer.completed"; conversationId: string; conversation: ConversationSummary }
+  | { type: "answer.error"; conversationId: string; message: string; retryable: boolean };
 
 export interface KnowledgeUploadJob {
   id: string;
@@ -160,6 +183,49 @@ export interface AuditEvent {
   riskLevel: "low" | "medium" | "high";
   createdAt: string;
   metadata: Record<string, unknown>;
+}
+
+export type RecommendationType = "question" | "clarification" | "handoff" | "action";
+
+export type RecommendationSource =
+  | "risk"
+  | "conversation"
+  | "user-profile"
+  | "business-config"
+  | "knowledge"
+  | "bandit"
+  | "ltr"
+  | "fallback";
+
+export type RecommendationEventType =
+  | "impression"
+  | "click"
+  | "dismiss"
+  | "sent"
+  | "failed"
+  | "converted"
+  | "blocked"
+  | "answer_completed"
+  | "satisfied"
+  | "unsatisfied"
+  | "handoff_needed_after_recommendation";
+
+export interface RecommendationItem {
+  id: string;
+  trackingId: string;
+  label: string;
+  type: RecommendationType;
+  source: RecommendationSource;
+  intent: string;
+  payload?: Record<string, unknown>;
+  score: number;
+  rank: number;
+  reasonCode: string;
+  expiresAt: string;
+  rankerVersion: string;
+  banditArmId?: string;
+  modelScore?: number;
+  explorationBucket?: "exploit" | "explore" | "disabled";
 }
 
 export interface ApiError {
