@@ -75,6 +75,7 @@ export class RagIndexService {
   }
 
   private async insertVectorChunk(knowledge: Knowledge, chunk: ChunkInput) {
+    const vector = `[${chunk.embedding.join(",")}]`;
     await this.prisma.$executeRaw(
       Prisma.sql`
         INSERT INTO "KnowledgeChunk" (
@@ -82,7 +83,7 @@ export class RagIndexService {
           "sourceUrl", "version", "sensitivity", "effectiveFrom", "effectiveTo", "tokenCount", "updatedAt"
         )
         VALUES (
-          ${chunk.id}, ${knowledge.id}, ${chunk.content}, ${chunk.embedding as Prisma.InputJsonArray}, ${chunk.metadata as Prisma.InputJsonObject},
+          ${chunk.id}, ${knowledge.id}, ${chunk.content}, ${vector}::vector, ${chunk.metadata as Prisma.InputJsonObject},
           ${knowledge.title}, ${knowledge.type}, ${knowledge.owner}, ${knowledge.sourceUrl}, ${knowledge.version},
           ${knowledge.sensitivity as SensitivityLevel}, ${knowledge.effectiveFrom}, ${knowledge.effectiveTo},
           ${Math.ceil(chunk.content.length / 2)}, NOW()
