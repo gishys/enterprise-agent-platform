@@ -1,0 +1,23 @@
+{
+  "name": "gov-enterprise-ai-service-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "政企智能客服平台：Web Chat、移动端 H5、客服工作台、运营后台、可信 RAG 与合规审计骨架。",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/web",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:api": "npm run start:dev -w apps/api",
+    "build": "npm run build -w packages/shared && npm run build -w apps/web && npm run build -w apps/api",
+    "test": "npm run test -w packages/shared && npm run test -w apps/api",
+    "typecheck": "npm run build -w packages/shared && npm run typecheck -w apps/web && npm run typecheck -w apps/api",
+    "prisma:generate": "npm run prisma:generate -w apps/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

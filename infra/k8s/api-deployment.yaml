@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-service-api
+  template:
+    metadata:
+      labels:
+        app: ai-service-api
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/ai-service/api:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: ai-service-api-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service-api
+spec:
+  selector:
+    app: ai-service-api
+  ports:
+    - port: 3000
+      targetPort: 3000

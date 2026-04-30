@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.vite/
+.turbo/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.log
+prisma/dev.db

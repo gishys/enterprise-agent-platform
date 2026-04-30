@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-service-web
+  template:
+    metadata:
+      labels:
+        app: ai-service-web
+    spec:
+      containers:
+        - name: web
+          image: registry.example.com/ai-service/web:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service-web
+spec:
+  selector:
+    app: ai-service-web
+  ports:
+    - port: 80
+      targetPort: 80

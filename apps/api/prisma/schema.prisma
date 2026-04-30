@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Channel {
+  WEB_CHAT
+  MOBILE_H5
+}
+
+enum ConversationStatus {
+  BOT_PROCESSING
+  WAITING_FOR_USER
+  TRANSFERRED_TO_HUMAN
+  HUMAN_PROCESSING
+  CLOSED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  HUMAN_AGENT
+  SYSTEM
+}
+
+enum KnowledgeStatus {
+  DRAFT
+  REVIEWING
+  PUBLISHED
+  EXPIRED
+  ARCHIVED
+}
+
+enum SensitivityLevel {
+  PUBLIC
+  INTERNAL
+  SENSITIVE
+  RESTRICTED
+}
+
+enum UserRole {
+  USER
+  AGENT
+  ADMIN
+  AUDITOR
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+model User {
+  id            String         @id @default(uuid())
+  username      String         @unique
+  passwordHash  String
+  displayName   String
+  department    String?
+  role          UserRole       @default(USER)
+  status        UserStatus     @default(ACTIVE)
+  lastLoginAt   DateTime?
+  createdAt     DateTime       @default(now())
+  conversations Conversation[]
+  auditEvents   AuditEvent[]
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  tokenHash  String
+  userAgent  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model Conversation {
+  id                   String             @id @default(uuid())
+  channel              Channel
+  status               ConversationStatus @default(WAITING_FOR_USER)
+  userId               String?
+  user                 User?              @relation(fields: [userId], references: [id])
+  longSummary          String             @default("")
+  humanHandoffReason   String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  messages             Message[]
+  satisfactions        Satisfaction[]
+  humanHandoffs        HumanHandoff[]
+}
+
+model Message {
+  id             String        @id @default(uuid())
+  conversationId String
+  conversation   Conversation  @relation(fields: [conversationId], references: [id])
+  role           MessageRole
+  content        String
+  auditTags      String[]      @default([])
+  createdAt      DateTime      @default(now())
+  sources        MessageSource[]
+}
+
+model MessageSource {
+  id          String       @id @default(uuid())
+  messageId   String
+  message     Message      @relation(fields: [messageId], references: [id])
+  knowledgeId String
+  knowledge   Knowledge    @relation(fields: [knowledgeId], references: [id])
+  score       Float
+  excerpt     String
+}
+
+model Knowledge {
+  id               String            @id @default(uuid())
+  type             String
+  title            String
+  body             String
+  owner            String
+  sourceUrl        String?
+  version          Int               @default(1)
+  status           KnowledgeStatus   @default(DRAFT)
+  sensitivity      SensitivityLevel  @default(INTERNAL)
+  effectiveFrom    DateTime?
+  effectiveTo      DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  messageSources   MessageSource[]
+}
+
+model PromptTemplate {
+  id          String   @id @default(uuid())
+  kind        String
+  version     Int      @default(1)
+  content     String
+  status      String   @default("draft")
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Satisfaction {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  messageId      String?
+  score          String
+  comment        String?
+  createdAt      DateTime     @default(now())
+}
+
+model HumanHandoff {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  reason         String
+  summary        String
+  status         String       @default("queued")
+  assignedTo     String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model AuditEvent {
+  id           String   @id @default(uuid())
+  actorId      String?
+  actor        User?    @relation(fields: [actorId], references: [id])
+  action       String
+  resourceType String
+  resourceId   String
+  riskLevel    String
+  metadata     Json
+  createdAt    DateTime @default(now())
+}
